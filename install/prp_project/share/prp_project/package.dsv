@@ -1,0 +1,5 @@
+source;share/prp_project/local_setup.bash
+source;share/prp_project/local_setup.dsv
+source;share/prp_project/local_setup.ps1
+source;share/prp_project/local_setup.sh
+source;share/prp_project/local_setup.zsh
