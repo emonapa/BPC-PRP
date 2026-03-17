@@ -42,17 +42,19 @@ MotorNode::MotorNode() : rclcpp::Node("motor_node") {
 }
 
 void MotorNode::timer_callback() {
-    // Spočítáme, kolik času uběhlo od spuštění uzlu
-    auto elapsed_time = this->now() - start_time_;
-
-    // Pokud neuběhla ještě 1 sekunda, jedeme naplno
-    if (elapsed_time.seconds() < 60.0) {
-        publish_motor_speed(160, 160);
-    }
-    // Pokud uběhla více než 1 sekunda, zastavíme motory
-    else {
-        publish_motor_speed(127, 127);
-    }
+//    ted to ridi line_loop.cpp
+//
+//    // Spočítáme, kolik času uběhlo od spuštění uzlu
+//    auto elapsed_time = this->now() - start_time_;
+//
+//    // Pokud neuběhla ještě 1 sekunda, jedeme naplno
+//    if (elapsed_time.seconds() < 60.0) {
+//        publish_motor_speed(138, 138);
+//    }
+//    // Pokud uběhla více než 1 sekunda, zastavíme motory
+//    else {
+//        publish_motor_speed(127, 127);
+//    }
 }
 
 

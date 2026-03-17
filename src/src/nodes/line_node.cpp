@@ -1,3 +1,4 @@
+/*
 #include "nodes/line_node.hpp"
 #include "helper.hpp"
 #include <algorithm> // Přidáno pro std::clamp
@@ -53,3 +54,5 @@ void LineNode::on_line_callback(const std_msgs::msg::UInt16MultiArray::SharedPtr
 }
 
 } // namespace nodes
+
+*/

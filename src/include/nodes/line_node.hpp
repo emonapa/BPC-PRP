@@ -1,10 +1,11 @@
+/*
 #pragma once
 
 #include <atomic>
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/u_int16_multi_array.hpp>
 #include <std_msgs/msg/u_int8_multi_array.hpp> // Pro rychlost motorů
-#include "LineEstimator.hpp"
+//#include "LineEstimator.hpp"
 
 namespace nodes {
 
@@ -25,3 +26,4 @@ private:
 };
 
 } // namespace nodes
+*/

@@ -18,7 +18,7 @@ find_package(visualization_msgs REQUIRED)
 set(SRC
   ${CMAKE_SOURCE_DIR}/src/nodes/io_node.cpp
   ${CMAKE_SOURCE_DIR}/src/nodes/motor_node.cpp
-  ${CMAKE_SOURCE_DIR}/src/nodes/line_node.cpp
+  ${CMAKE_SOURCE_DIR}/src/loops/line_loop.cpp
 )
 
 set(AMENT_LIBS rclcpp std_msgs sensor_msgs cv_bridge image_transport)
