@@ -2,6 +2,9 @@
 
 #include <iostream>
 #include <chrono>
+#include <algorithm>
+using namespace std;
+
 
 namespace algorithms {
 
@@ -17,6 +20,9 @@ namespace algorithms {
             if (std::abs(error) > 0.001f) {
                 integral_ += error * dt;
             }
+            if (std::abs(error) < 0.01f) {
+                    integral_ = 0;
+                }
 
             // 2. Tvrdý limit (Saturace) - nikdy nenulovat, jen zastavit
             float max_integral = 50.0f; 
@@ -24,7 +30,8 @@ namespace algorithms {
 
             float derivative = (error - prev_error_) / dt;
             float output = (kp_ * error) + (ki_ * integral_) + (kd_ * derivative);
-
+            std::printf("ki: %.7f | integreal: %.2f\n", 
+                 ki_, integral_);
             prev_error_ = error;
             return output;
         }

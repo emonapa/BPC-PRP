@@ -7,7 +7,7 @@ namespace loops {
 LineLoop::LineLoop() : rclcpp::Node("line_loop"),
                        // Zde nastavujete konstanty (Kp, Ki, Kd).
                        // Začněte jen s Kp (P-Control), např. 1500.0, a zbytek nechte na 0.
-                       pid_controller_(800.0f, 100.0f, 80.0f)
+                       pid_controller_(2000.0f, 200.0f, 50.0f)
 {
     line_sub_ = this->create_subscription<std_msgs::msg::UInt16MultiArray>(
         Topic::get_line, 10,
@@ -44,7 +44,7 @@ void LineLoop::timer_callback() {
     
     // 3. Dynamická base_speed
     // Tip: Můžeš base_speed snižovat, pokud je chyba (error) příliš velká = v zatáčce zpomalit.
-    int base_speed = 160; 
+    int base_speed = 180; 
 
     // Výpočet rychlostí
     int left_speed  = base_speed - static_cast<int>(output);
@@ -52,8 +52,8 @@ void LineLoop::timer_callback() {
 
     // 4. Lepší saturace:
     // Pokud tvůj driver bere 0-255, kde 127 je stop, pak:
-    left_speed  = std::clamp(left_speed, 0, 255);
-    right_speed = std::clamp(right_speed, 0, 255);
+    left_speed  = std::clamp(left_speed, 127, 255);
+    right_speed = std::clamp(right_speed, 127, 255);
 
     // Logování pro ladění (přidáno zobrazení chyby a výstupu vedle sebe)
     RCLCPP_INFO(this->get_logger(), "Err: %.7f | Out: %.2f | L: %d R: %d", 
