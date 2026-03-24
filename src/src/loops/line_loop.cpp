@@ -37,14 +37,14 @@ void LineLoop::timer_callback() {
     last_time_ = now;
 
     // 1. Ochrana: Pokud je dt příliš velké (např. vteřina), PID by se zbláznilo
-    if (dt <= 0.0f || dt > 0.2f) return; 
+    if (dt <= 0.0f || dt > 0.2f) return;
 
     // 2. Výpočet PID
     float output = pid_controller_.step(current_error_, dt);
-    
+
     // 3. Dynamická base_speed
     // Tip: Můžeš base_speed snižovat, pokud je chyba (error) příliš velká = v zatáčce zpomalit.
-    int base_speed = 180; 
+    int base_speed = 180;
 
     // Výpočet rychlostí
     int left_speed  = base_speed - static_cast<int>(output);
@@ -56,7 +56,7 @@ void LineLoop::timer_callback() {
     right_speed = std::clamp(right_speed, 127, 255);
 
     // Logování pro ladění (přidáno zobrazení chyby a výstupu vedle sebe)
-    RCLCPP_INFO(this->get_logger(), "Err: %.7f | Out: %.2f | L: %d R: %d", 
+    RCLCPP_INFO(this->get_logger(), "Err: %.7f | Out: %.2f | L: %d R: %d",
                  current_error_, output, left_speed, right_speed);
 
     // 5. Publikace

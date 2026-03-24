@@ -2,7 +2,6 @@ docker start humble
 docker exec -it humble bash
 
 source install/setup.bash
-source /opt/ros/humble/setup.bash
 
 colcon build --packages-select prp_project
 ros2 run prp_project prp_project

@@ -1,6 +1,8 @@
 build/
 TAGS
 
+.vscode/
+
 log/
 
 src/build
