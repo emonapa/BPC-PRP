@@ -7,13 +7,14 @@ enum class DiscreteLinePose {
     LineNone,
     LineBoth,
 };
+using namespace std;
 
 class LineEstimator {
 public:
     // Konštanty pre kalibráciu (v reálnej praxi by mali byť konfigurovateľné)
     static constexpr uint16_t MIN_ADC = 35;  // Biela plocha
     static constexpr uint16_t MAX_ADC_LEFT = 550; // Čierna čiara
-    static constexpr uint16_t MAX_ADC_RIGHT = 350; // Čierna čiara
+    static constexpr uint16_t MAX_ADC_RIGHT = 550; // Čierna čiara
     static constexpr float SENSOR_DISTANCE_M = 0.027; // Vzdialenosť senzorov 4cm
 
     static float normalize(uint16_t raw, bool is_right) {
@@ -44,5 +45,6 @@ public:
         // Diferenciálny výpočet: (L - R) nám dá smer odchýlky
         // Výsledok je v metroch od stredu
         return (l - r) * (SENSOR_DISTANCE_M / 2.0f);
+        std:printf;
     }
 };
