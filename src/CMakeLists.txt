@@ -19,6 +19,8 @@ set(SRC
   ${CMAKE_SOURCE_DIR}/src/nodes/io_node.cpp
   ${CMAKE_SOURCE_DIR}/src/nodes/motor_node.cpp
   ${CMAKE_SOURCE_DIR}/src/loops/line_loop.cpp
+  ${CMAKE_SOURCE_DIR}/src/nodes/lidar_node.cpp
+   ${CMAKE_SOURCE_DIR}/src/loops/robot_movment.cpp
 )
 
 set(AMENT_LIBS rclcpp std_msgs sensor_msgs cv_bridge image_transport)

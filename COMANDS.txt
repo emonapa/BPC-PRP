@@ -6,7 +6,7 @@ source install/setup.bash
 colcon build --packages-select prp_project
 ros2 run prp_project prp_project
 export ROS_DOMAIN_ID=2
-
+ros2 topic list
 // Druhy terminal:
 docker exec -it humble bash
 ros2 run rqt_plot rqt_plot

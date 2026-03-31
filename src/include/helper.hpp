@@ -11,6 +11,7 @@ namespace Topic {
    const std::string set_motor_speed = "/bpc_prp_robot/set_motor_speeds";
    const std::string get_motor_speed = "/bpc_prp_robot/encoders";
    const std::string get_line = "/bpc_prp_robot/line_sensors";
+   const std::string get_lidar="/bpc_prp_robot/lidar";
 };
 
 namespace Frame {
