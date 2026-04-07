@@ -44,8 +44,8 @@ void ImuNode::on_imu_msg(const sensor_msgs::msg::Imu::SharedPtr msg) {
     if (mode_ == ImuNodeMode::CALIBRATE) {
         gyro_calibration_samples_.push_back(gyro_z);
 
-        // Po cca 2-3 vteřinách (cca 150 zpráv) kalibraci ukončíme
-        if (gyro_calibration_samples_.size() >= 150) {
+        // Po cca 2-3 vteřinách (cca 200 zpráv) kalibraci ukončíme
+        if (gyro_calibration_samples_.size() >= 200) {
             planar_integrator_.setCalibration(gyro_calibration_samples_);
             mode_ = ImuNodeMode::INTEGRATE;
             target_yaw_ = 0.0f; // Jakmile je zkalibrován, stanovíme cíl na "drž aktuální úhel 0"
