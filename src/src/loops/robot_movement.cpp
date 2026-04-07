@@ -1,44 +1,44 @@
-#include "loops/robot_movment.hpp"
+#include "loops/robot_movement.hpp"
 #include "helper.hpp"
 #include <algorithm>
 #include "algorithms/lidar_alg.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 namespace loops {
 
-MovmentLoop::MovmentLoop() : rclcpp::Node("robot_movment_node"),
+MovementLoop::MovementLoop() : rclcpp::Node("robot_movement_node"),
                        // Zde nastavujete konstanty (Kp, Ki, Kd).
                        // Začněte jen s Kp (P-Control), např. 1500.0, a zbytek nechte na 0.
                        pid_controller_(100.0f, 0.0f, 10.0f)
 {
-    // V súbore robot_movment.cpp v konštruktore pridaj:
+    // V súbore robot_movement.cpp v konštruktore pridaj:
     lidar_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
-        Topic::get_lidar, 
-        10, 
-        std::bind(&MovmentLoop::move_callback, this, std::placeholders::_1)
+        Topic::get_lidar,
+        10,
+        std::bind(&MovementLoop::move_callback, this, std::placeholders::_1)
     );
     motor_pub_ = this->create_publisher<std_msgs::msg::UInt8MultiArray>(
         Topic::set_motor_speed, 10);
-    
+
     // Smyčka běží každých 50 ms (20 Hz)
     timer_ = this->create_wall_timer(
         std::chrono::milliseconds(50),
-        std::bind(&MovmentLoop::timer_callback, this));
+        std::bind(&MovementLoop::timer_callback, this));
 
     last_time_ = this->now();
     RCLCPP_INFO(this->get_logger(), "Motor initialized.");
 }
 
-void MovmentLoop::move_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
+void MovementLoop::move_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
     if (!msg) return;
-    latest_scan_ = msg; 
-    
+    latest_scan_ = msg;
+
 }
 
-void MovmentLoop::timer_callback() {
+void MovementLoop::timer_callback() {
     rclcpp::Time now = this->now();
     float dt = (now - last_time_).seconds();
-    if (dt <= 0) dt = 0.05; 
-    
+    if (dt <= 0) dt = 0.05;
+
     algorithms::LidarFilter filter;
     last_time_ = now;
 
@@ -50,7 +50,7 @@ void MovmentLoop::timer_callback() {
         latest_scan_->angle_max
     );
 
-   
+
     const float MAX_LOOK_DIST = 0.5f;
 
     // 2. Pokud je hodnota z LIDARu příliš velká nebo chybná (inf/nan), omez ji
@@ -59,16 +59,16 @@ void MovmentLoop::timer_callback() {
 
     // 3. Výpočet chyby
     current_error_ = L - R;
-    
+
     // PID výstup
     float steering_output = pid_controller_.step(current_error_, dt);
 
     // --- DYNAMICKÁ RYCHLOST ---
-    int base_speed = 140; 
-    
+    int base_speed = 140;
+
     // Pokud hodně zatáčím (vysoký steering), zpomalím base_speed, abych nevyletěl
         if (std::abs(steering_output) > 20) {
-            base_speed = 135; 
+            base_speed = 135;
         }
 
         int left_speed  = base_speed - static_cast<int>(steering_output);
@@ -78,8 +78,8 @@ void MovmentLoop::timer_callback() {
         if (R >= MAX_LOOK_DIST && results.front < 0.4f) {
             // Vidím zeď před sebou a vpravo je volno -> Jdi ostře doprava
             left_speed = 134;
-            right_speed = 120; 
-        } 
+            right_speed = 120;
+        }
         else if (L >= MAX_LOOK_DIST && results.front < 0.4f) {
             // Vidím zeď před sebou a vlevo je volno -> Jdi ostře doleva
             left_speed = 120;
