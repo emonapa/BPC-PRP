@@ -8,3 +8,5 @@ log/
 src/build
 
 src/logger
+
+install/

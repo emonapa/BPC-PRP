@@ -1,13 +1,22 @@
 #pragma once
 
 #include <rclcpp/rclcpp.hpp>
-#include <std_msgs/msg/u_int16_multi_array.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
+#include <sensor_msgs/msg/imu.hpp> // Přidáno IMU
 #include <std_msgs/msg/u_int8_multi_array.hpp>
+
 #include "algorithms/pid.hpp"
-#include "algorithms/lidar_alg.hpp"
-#include "sensor_msgs/msg/laser_scan.hpp"
+#include "algorithms/planar_imu_integrator.hpp" // Matematika pro IMU
+#include "helper.hpp"
 
 namespace loops {
+
+// Tři stavy přesně podle Labu 9
+enum class MazeState {
+    CALIBRATION,
+    CORRIDOR_FOLLOWING,
+    TURNING
+};
 
 class MovementLoop : public rclcpp::Node {
 public:
@@ -15,17 +24,32 @@ public:
     ~MovementLoop() override = default;
 
 private:
-    // robot_movement.hpp
-   void move_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg);
-    void timer_callback(); // Pravidelná smyčka pro výpočet PID
+    void lidar_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg);
+    void imu_callback(const sensor_msgs::msg::Imu::SharedPtr msg);
+    void timer_callback();
+
+    void set_speed(int left, int right);
+
+    // Subscribery a Publisher
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr lidar_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
     rclcpp::Publisher<std_msgs::msg::UInt8MultiArray>::SharedPtr motor_pub_;
     rclcpp::TimerBase::SharedPtr timer_;
+
+    // Data
     sensor_msgs::msg::LaserScan::SharedPtr latest_scan_;
-    // Proměnné pro řízení
-    float current_error_ = 0.0f;
-    rclcpp::Time last_time_;
-    algorithms::Pid pid_controller_;
+    algorithms::PlanarImuIntegrator imu_integrator_;
+    std::vector<float> gyro_calibration_samples_;
+
+    // PID regulátory
+    algorithms::Pid wall_pid_;
+    algorithms::Pid turn_pid_;
+
+    // Proměnné pro stavový automat
+    MazeState current_state_ = MazeState::CALIBRATION;
+    float target_yaw_ = 0.0f;
+    rclcpp::Time last_imu_time_;
+    bool first_imu_ = true;
 };
 
 } // namespace loops
