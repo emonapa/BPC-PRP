@@ -3,12 +3,13 @@
 #include <algorithm>
 #include "algorithms/lidar_alg.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
+#include "nodes/imu_node.hpp"
 namespace loops {
 
 MovementLoop::MovementLoop() : rclcpp::Node("robot_movement_node"),
                        // Zde nastavujete konstanty (Kp, Ki, Kd).
                        // Začněte jen s Kp (P-Control), např. 1500.0, a zbytek nechte na 0.
-                       pid_controller_(100.0f, 0.0f, 10.0f)
+                       pid_controller_(10.0f, 1.0f, 10.0f)
 {
     // V súbore robot_movement.cpp v konštruktore pridaj:
     lidar_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
@@ -75,15 +76,19 @@ void MovementLoop::timer_callback() {
         int right_speed = base_speed + static_cast<int>(steering_output);
 
         // Pokud je jedna strana úplně volná (např. v zatáčce)
-        if (R >= MAX_LOOK_DIST && results.front < 0.4f) {
+        if(results.front < 0.2f){
+            left_speed = 127;
+            right_speed = 127;
+        }
+        else if (R >= MAX_LOOK_DIST && results.front < 0.4f) {
             // Vidím zeď před sebou a vpravo je volno -> Jdi ostře doprava
-            left_speed = 134;
-            right_speed = 120;
+            left_speed = 127;
+            right_speed = 127;
         }
         else if (L >= MAX_LOOK_DIST && results.front < 0.4f) {
             // Vidím zeď před sebou a vlevo je volno -> Jdi ostře doleva
-            left_speed = 120;
-            right_speed = 134;
+            left_speed = 127;
+            right_speed = 127;
         }
         else {
             // Standardní PID udržování středu

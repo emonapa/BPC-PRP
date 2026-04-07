@@ -32,10 +32,10 @@ int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
 
     // auto lidar_node = std::make_shared<nodes::LidarNode>();
-    auto imu_node = std::make_shared<nodes::ImuNode>(); // ZDE
-
+    // auto imu_node = std::make_shared<nodes::ImuNode>(); // ZDE
+     auto movement =std::make_shared<loops::MovementLoop>();
     rclcpp::executors::SingleThreadedExecutor executor;
-    executor.add_node(imu_node); // ZDE
+    executor.add_node(movement); // ZDE
 
     executor.spin();
     rclcpp::shutdown();
