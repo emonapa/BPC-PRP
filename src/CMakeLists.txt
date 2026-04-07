@@ -20,7 +20,7 @@ set(SRC
   ${CMAKE_SOURCE_DIR}/src/nodes/motor_node.cpp
   ${CMAKE_SOURCE_DIR}/src/loops/line_loop.cpp
   ${CMAKE_SOURCE_DIR}/src/nodes/lidar_node.cpp
-  ${CMAKE_SOURCE_DIR}/src/loops/robot_movment.cpp
+  ${CMAKE_SOURCE_DIR}/src/loops/robot_movement.cpp
   ${CMAKE_SOURCE_DIR}/src/nodes/imu_node.cpp
 )
 
