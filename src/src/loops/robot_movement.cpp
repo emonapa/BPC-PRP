@@ -1,107 +1,144 @@
 #include "loops/robot_movement.hpp"
-#include "helper.hpp"
-#include <algorithm>
 #include "algorithms/lidar_alg.hpp"
-#include "sensor_msgs/msg/laser_scan.hpp"
-#include "nodes/imu_node.hpp"
+#include <algorithm>
+#include <cmath>
+
 namespace loops {
 
 MovementLoop::MovementLoop() : rclcpp::Node("robot_movement_node"),
-                       // Zde nastavujete konstanty (Kp, Ki, Kd).
-                       // Začněte jen s Kp (P-Control), např. 1500.0, a zbytek nechte na 0.
-                       pid_controller_(10.0f, 1.0f, 10.0f)
+    wall_pid_(100.0f, 0.0f, 10.0f), // PID pro držení se zdi
+    turn_pid_(50.0f, 0.0f, 5.0f)    // PID pro přesné otáčení na úhel
 {
-    // V súbore robot_movement.cpp v konštruktore pridaj:
+    // Odběr LiDARu
     lidar_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
-        Topic::get_lidar,
-        10,
-        std::bind(&MovementLoop::move_callback, this, std::placeholders::_1)
-    );
+        Topic::get_lidar, 10, std::bind(&MovementLoop::lidar_callback, this, std::placeholders::_1));
+
+    // Odběr IMU
+    imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
+        "/bpc_prp_robot/imu", 10, std::bind(&MovementLoop::imu_callback, this, std::placeholders::_1));
+
+    // Publikace motorů
     motor_pub_ = this->create_publisher<std_msgs::msg::UInt8MultiArray>(
         Topic::set_motor_speed, 10);
 
-    // Smyčka běží každých 50 ms (20 Hz)
+    // Hlavní smyčka
     timer_ = this->create_wall_timer(
-        std::chrono::milliseconds(50),
-        std::bind(&MovementLoop::timer_callback, this));
+        std::chrono::milliseconds(50), std::bind(&MovementLoop::timer_callback, this));
 
-    last_time_ = this->now();
-    RCLCPP_INFO(this->get_logger(), "Motor initialized.");
+    RCLCPP_INFO(this->get_logger(), "Mozek robota aktivovan. Zacinam kalibraci IMU...");
 }
 
-void MovementLoop::move_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
-    if (!msg) return;
-    latest_scan_ = msg;
+void MovementLoop::set_speed(int left, int right) {
+    left = std::clamp(left, 0, 255);
+    right = std::clamp(right, 0, 255);
+    std_msgs::msg::UInt8MultiArray speed_msg;
+    speed_msg.data = { static_cast<uint8_t>(left), static_cast<uint8_t>(right) };
+    motor_pub_->publish(speed_msg);
+}
 
+void MovementLoop::lidar_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
+    latest_scan_ = msg;
+}
+
+// Zde se jen na pozadí počítá úhel z gyroskopu
+void MovementLoop::imu_callback(const sensor_msgs::msg::Imu::SharedPtr msg) {
+    rclcpp::Time now = msg->header.stamp;
+    if (first_imu_) {
+        last_imu_time_ = now;
+        first_imu_ = false;
+        return;
+    }
+    double dt = (now - last_imu_time_).seconds();
+    last_imu_time_ = now;
+
+    if (dt <= 0.0 || dt > 0.5) return;
+
+    float gyro_z = msg->angular_velocity.z;
+
+    if (current_state_ == MazeState::CALIBRATION) {
+        gyro_calibration_samples_.push_back(gyro_z);
+        if (gyro_calibration_samples_.size() >= 100) { // Cca 2 sekundy
+            imu_integrator_.setCalibration(gyro_calibration_samples_);
+            current_state_ = MazeState::CORRIDOR_FOLLOWING;
+            RCLCPP_INFO(this->get_logger(), "Kalibrace HOTOVA! Jedu do bludiste.");
+        }
+    } else {
+        imu_integrator_.update(gyro_z, dt);
+    }
 }
 
 void MovementLoop::timer_callback() {
-    rclcpp::Time now = this->now();
-    float dt = (now - last_time_).seconds();
-    if (dt <= 0) dt = 0.05;
-
-    algorithms::LidarFilter filter;
-    last_time_ = now;
+    if (current_state_ == MazeState::CALIBRATION) {
+        set_speed(127, 127); // Během kalibrace MUSÍ stát
+        return;
+    }
 
     if (!latest_scan_) return;
 
-    auto results = filter.apply_filter(
-        latest_scan_->ranges,
-        latest_scan_->angle_min,
-        latest_scan_->angle_max
-    );
+    algorithms::LidarFilter filter;
+    auto results = filter.apply_filter(latest_scan_->ranges, latest_scan_->angle_min, latest_scan_->angle_max);
 
+    // --- STAVOVÝ AUTOMAT ---
+    switch (current_state_) {
 
-    const float MAX_LOOK_DIST = 0.5f;
+        case MazeState::CORRIDOR_FOLLOWING: {
+            float L = std::min(results.left, 0.5f);
+            float R = std::min(results.right, 0.5f);
+            float error = L - R;
 
-    // 2. Pokud je hodnota z LIDARu příliš velká nebo chybná (inf/nan), omez ji
-    float L = (std::isfinite(results.left) && results.left < MAX_LOOK_DIST) ? results.left : MAX_LOOK_DIST;
-    float R = (std::isfinite(results.right) && results.right < MAX_LOOK_DIST) ? results.right : MAX_LOOK_DIST;
+            // Zjistíme, jestli nejsme v rohu (překážka vpředu)
+            if (results.front < 0.35f) {
+                // Přepínáme se do módu "OTÁČENÍ"
+                current_state_ = MazeState::TURNING;
 
-    // 3. Výpočet chyby
-    current_error_ = L - R;
+                float current_yaw = imu_integrator_.getYaw();
 
-    // PID výstup
-    float steering_output = pid_controller_.step(current_error_, dt);
+                if (R >= 0.4f) {
+                    // Zeď vpředu, vpravo volno -> Cíl je -90 stupňů
+                    target_yaw_ = current_yaw - (M_PI / 2.0f);
+                    RCLCPP_INFO(this->get_logger(), "Roh! Budu tocit DOPRAVA.");
+                } else {
+                    // Zeď vpředu, vlevo volno -> Cíl je +90 stupňů
+                    target_yaw_ = current_yaw + (M_PI / 2.0f);
+                    RCLCPP_INFO(this->get_logger(), "Roh! Budu tocit DOLEVA.");
+                }
+                break; // Konec tohoto cyklu, motor se nastaví až příště
+            }
 
-    // --- DYNAMICKÁ RYCHLOST ---
-    int base_speed = 140;
-
-    // Pokud hodně zatáčím (vysoký steering), zpomalím base_speed, abych nevyletěl
-        if (std::abs(steering_output) > 20) {
-            base_speed = 135;
+            // Normální jízda chodbou (PID)
+            float steering = wall_pid_.step(error, 0.05f);
+            int base_speed = 145;
+            set_speed(base_speed - static_cast<int>(steering), base_speed + static_cast<int>(steering));
+            break;
         }
 
-        int left_speed  = base_speed - static_cast<int>(steering_output);
-        int right_speed = base_speed + static_cast<int>(steering_output);
+        case MazeState::TURNING: {
+            float current_yaw = imu_integrator_.getYaw();
+            float yaw_error = target_yaw_ - current_yaw;
 
-        // Pokud je jedna strana úplně volná (např. v zatáčce)
-        if(results.front < 0.2f){
-            left_speed = 127;
-            right_speed = 127;
-        }
-        else if (R >= MAX_LOOK_DIST && results.front < 0.4f) {
-            // Vidím zeď před sebou a vpravo je volno -> Jdi ostře doprava
-            left_speed = 127;
-            right_speed = 127;
-        }
-        else if (L >= MAX_LOOK_DIST && results.front < 0.4f) {
-            // Vidím zeď před sebou a vlevo je volno -> Jdi ostře doleva
-            left_speed = 127;
-            right_speed = 127;
-        }
-        else {
-            // Standardní PID udržování středu
-            float steering = pid_controller_.step(current_error_, dt);
-            left_speed = base_speed - steering;
-            right_speed = base_speed + steering;
-        }
+            // Normalizace úhlu (aby se netočil jak pes za ocasem)
+            while (yaw_error > M_PI) yaw_error -= 2.0f * M_PI;
+            while (yaw_error < -M_PI) yaw_error += 2.0f * M_PI;
 
-            // Publikace (clamp zůstává)
-            std_msgs::msg::UInt8MultiArray speed_msg;
-            speed_msg.data.push_back(static_cast<uint8_t>(std::clamp(left_speed, 0, 255)));
-            speed_msg.data.push_back(static_cast<uint8_t>(std::clamp(right_speed, 0, 255)));
-            motor_pub_->publish(speed_msg);
+            // Pokud jsme cílového úhlu dosáhli (tolerance cca 3 stupně)
+            if (std::abs(yaw_error) < 0.05f) {
+                current_state_ = MazeState::CORRIDOR_FOLLOWING;
+                turn_pid_.reset(); // Vyčistíme integrál z PID
+                RCLCPP_INFO(this->get_logger(), "Otocka hotova, jedu rovne.");
+                break;
+            }
+
+            // Otáčení na místě pomocí PID
+            float turn_speed = turn_pid_.step(yaw_error, 0.05f);
+            int correction = static_cast<int>(turn_speed);
+
+            // Limit síly zatáčení
+            correction = std::clamp(correction, -40, 40);
+
+            set_speed(127 - correction, 127 + correction);
+            break;
         }
+    }
+}
 
 } // namespace loops
