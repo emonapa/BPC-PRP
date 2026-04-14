@@ -1,16 +1,12 @@
 #include "loops/robot_movement.hpp"
 #include "algorithms/lidar_alg.hpp"
+#include <opencv2/opencv.hpp> // PŘIDÁNO PRO KAMERU
 #include <algorithm>
 #include <cmath>
-#include <opencv2/opencv.hpp> // PŘIDÁNO PRO KAMERU
-
-using namespace std;
 
 namespace loops {
 
 MovementLoop::MovementLoop() : rclcpp::Node("robot_movement_node"),
-    wall_pid_(30.0f, 0.1f, 15.0f), // PID pro držení se zdi
-    turn_pid_(10.0f, 0.5f, 15.0f)    // PID pro přesné otáčení na úhel
     wall_pid_(15.0f, 0.1f, 25.0f), // PID pro držení se zdi
     turn_pid_(20.0f, 0.2f, 10.0f)   // PID pro přesné otáčení na úhel
 {
@@ -22,14 +18,13 @@ MovementLoop::MovementLoop() : rclcpp::Node("robot_movement_node"),
     imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
         "/bpc_prp_robot/imu", 10, std::bind(&MovementLoop::imu_callback, this, std::placeholders::_1));
 
-    // Odběr Kamery (PŘIDÁNO)
-    camera_sub_ = this->create_subscription<sensor_msgs::msg::CompressedImage>(
-        "/bpc_prp_robot/camera/compressed", 10, std::bind(&MovementLoop::camera_callback, this, std::placeholders::_1));
-
     // Publikace motorů
     motor_pub_ = this->create_publisher<std_msgs::msg::UInt8MultiArray>(
         Topic::set_motor_speed, 10);
 
+     // Odběr Kamery (PŘIDÁNO)
+    camera_sub_ = this->create_subscription<sensor_msgs::msg::CompressedImage>(
+         "/bpc_prp_robot/camera/compressed", 10, std::bind(&MovementLoop::camera_callback, this, std::placeholders::_1));
     // Hlavní smyčka
     timer_ = this->create_wall_timer(
         std::chrono::milliseconds(50), std::bind(&MovementLoop::timer_callback, this));
@@ -37,9 +32,14 @@ MovementLoop::MovementLoop() : rclcpp::Node("robot_movement_node"),
     RCLCPP_INFO(this->get_logger(), "Mozek robota aktivovan. Zacinam kalibraci IMU...");
 }
 
-// ---------------------------------------------------------
-// NOVÁ FUNKCE: Zpracování obrazu z kamery na pozadí
-// ---------------------------------------------------------
+void MovementLoop::set_speed(int left, int right) {
+    left = std::clamp(left, 0, 255);
+    right = std::clamp(right, 0, 255);
+    std_msgs::msg::UInt8MultiArray speed_msg;
+    speed_msg.data = { static_cast<uint8_t>(left), static_cast<uint8_t>(right) };
+    motor_pub_->publish(speed_msg);
+}
+
 void MovementLoop::camera_callback(const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
     try {
         // Převedení zkomprimovaných dat (JPEG) do OpenCV matice
@@ -62,20 +62,12 @@ void MovementLoop::camera_callback(const sensor_msgs::msg::CompressedImage::Shar
         RCLCPP_ERROR(this->get_logger(), "OpenCV Error: %s", e.what());
     }
 }
-// ---------------------------------------------------------
-
-void MovementLoop::set_speed(int left, int right) {
-    left = std::clamp(left, 0, 255);
-    right = std::clamp(right, 0, 255);
-    std_msgs::msg::UInt8MultiArray speed_msg;
-    speed_msg.data = { static_cast<uint8_t>(left), static_cast<uint8_t>(right) };
-    motor_pub_->publish(speed_msg);
-}
 
 void MovementLoop::lidar_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
     latest_scan_ = msg;
 }
 
+// Zde se jen na pozadí počítá úhel z gyroskopu
 void MovementLoop::imu_callback(const sensor_msgs::msg::Imu::SharedPtr msg) {
     rclcpp::Time now = msg->header.stamp;
     if (first_imu_) {
@@ -92,7 +84,7 @@ void MovementLoop::imu_callback(const sensor_msgs::msg::Imu::SharedPtr msg) {
 
     if (current_state_ == MazeState::CALIBRATION) {
         gyro_calibration_samples_.push_back(gyro_z);
-        if (gyro_calibration_samples_.size() >= 100) {
+        if (gyro_calibration_samples_.size() >= 100) { // Cca 2 sekundy
             imu_integrator_.setCalibration(gyro_calibration_samples_);
             current_state_ = MazeState::CORRIDOR_FOLLOWING;
             RCLCPP_INFO(this->get_logger(), "Kalibrace HOTOVA! Jedu do bludiste.");
@@ -118,9 +110,6 @@ void MovementLoop::timer_callback() {
 
     algorithms::LidarFilter filter;
     auto results = filter.apply_filter(latest_scan_->ranges, latest_scan_->angle_min, latest_scan_->angle_max);
-
-    // Výpis pro debug
-    //printf("front = %f, left = %f, right = %f, back = %f\n", results.front, results.left, results.right, results.back);
 
     switch (current_state_) {
 
