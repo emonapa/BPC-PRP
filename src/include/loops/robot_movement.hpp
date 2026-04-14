@@ -2,16 +2,17 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
-#include <sensor_msgs/msg/imu.hpp> // Přidáno IMU
+#include <sensor_msgs/msg/imu.hpp>
+#include <sensor_msgs/msg/compressed_image.hpp> // PŘIDÁNO PRO KAMERU
 #include <std_msgs/msg/u_int8_multi_array.hpp>
 
 #include "algorithms/pid.hpp"
-#include "algorithms/planar_imu_integrator.hpp" // Matematika pro IMU
+#include "algorithms/planar_imu_integrator.hpp"
+#include "algorithms/aruco_detector.hpp"        // PŘIDÁNO PRO KAMERU
 #include "helper.hpp"
 
 namespace loops {
 
-// Tři stavy přesně podle Labu 9
 enum class MazeState {
     CALIBRATION,
     CORRIDOR_FOLLOWING,
@@ -26,6 +27,7 @@ public:
 private:
     void lidar_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg);
     void imu_callback(const sensor_msgs::msg::Imu::SharedPtr msg);
+    void camera_callback(const sensor_msgs::msg::CompressedImage::SharedPtr msg); // PŘIDÁNO PRO KAMERU
     void timer_callback();
 
     void set_speed(int left, int right);
@@ -33,6 +35,7 @@ private:
     // Subscribery a Publisher
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr lidar_sub_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr camera_sub_; // PŘIDÁNO PRO KAMERU
     rclcpp::Publisher<std_msgs::msg::UInt8MultiArray>::SharedPtr motor_pub_;
     rclcpp::TimerBase::SharedPtr timer_;
 
@@ -40,6 +43,10 @@ private:
     sensor_msgs::msg::LaserScan::SharedPtr latest_scan_;
     algorithms::PlanarImuIntegrator imu_integrator_;
     std::vector<float> gyro_calibration_samples_;
+
+    // --- PAMĚŤ PRO KAMERU A ZNAČKY ---
+    algorithms::ArucoDetector aruco_detector_;
+    std::vector<algorithms::ArucoDetector::Aruco> last_markers_;
 
     // PID regulátory
     algorithms::Pid wall_pid_;

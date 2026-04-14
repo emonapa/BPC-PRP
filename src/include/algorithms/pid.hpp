@@ -25,12 +25,12 @@ namespace algorithms {
                 }
 
             // 2. Tvrdý limit (Saturace) - nikdy nenulovat, jen zastavit
-            float max_integral = 50.0f; 
+            float max_integral = 10.0f;
             integral_ = std::clamp(integral_, -max_integral, max_integral);
 
             float derivative = (error - prev_error_) / dt;
             float output = (kp_ * error) + (ki_ * integral_) + (kd_ * derivative);
-            std::printf("ki: %.7f | integreal: %.2f | error %.2f \n", 
+            std::printf("ki: %.7f | integreal: %.2f | error %.2f \n",
                  ki_, integral_,error);
             prev_error_ = error;
             return output;
