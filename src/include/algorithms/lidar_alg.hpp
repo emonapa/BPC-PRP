@@ -15,39 +15,45 @@ namespace algorithms {
 
     class LidarFilter {
     public:
+        // Zúžené zorné pole pro bludiště (klapky na oči proti rohům)
+        static constexpr float SECTOR_HALF_WIDTH_DEG = 25.0f;
+
         LidarFilter() = default;
 
-        LidarFilterResults apply_filter(std::vector<float> points, float angle_start, float angle_end) {
-            std::vector<float> left, right, front, back;
+        LidarFilterResults apply_filter(const std::vector<float>& points, float angle_start, float angle_end) {
 
-            // KONŠTANTA PRE PRESNOSŤ: 
-            // Pôvodných M_PI/8 (22.5°) nahradíme cca 5° (M_PI/36).
-            // Tým získaš priemer z viacerých bodov (stabilitu), 
-            // ale len z tých, ktoré sú takmer kolmo na stenu.
-            constexpr float angle_range = M_PI / 36.0f; 
+            std::vector<float> left;
+            std::vector<float> right;
+            std::vector<float> front;
+            std::vector<float> back;
 
             auto angle_step = (angle_end - angle_start) / points.size();
+            const float HW_RAD = SECTOR_HALF_WIDTH_DEG * M_PI / 180.0f;
 
             for (size_t i = 0; i < points.size(); ++i) {
-                auto angle = angle_start + i * angle_step;
+                float angle = angle_start + i * angle_step;
                 float value = points[i];
 
-                if (!std::isfinite(value) || value <= 0.01f) continue;
+                if (std::isinf(value) || std::isnan(value) || value <= 0.01f) {
+                    continue;
+                }
 
-                // 1. BACK (0 rad)
-                if (std::abs(angle) < angle_range) {
+                float norm_angle = std::atan2(std::sin(angle), std::cos(angle));
+
+                // ZADEK: 0 stupňů (LiDAR má nulu namířenou dozadu)
+                if (std::abs(norm_angle) <= HW_RAD) {
                     back.push_back(value);
                 }
-                // 2. RIGHT (PI/2 rad)
-                else if (std::abs(angle - M_PI/2.0f) < angle_range) {
+                // VPRAVO: +90 stupňů
+                else if (std::abs(norm_angle - (M_PI / 2.0f)) <= HW_RAD) {
                     right.push_back(value);
                 }
-                // 3. LEFT (-PI/2 rad)
-                else if (std::abs(angle + M_PI/2.0f) < angle_range) {
+                // VLEVO: -90 stupňů
+                else if (std::abs(norm_angle + (M_PI / 2.0f)) <= HW_RAD) {
                     left.push_back(value);
                 }
-                // 4. FRONT (PI rad)
-                else if (std::abs(std::abs(angle) - M_PI) < angle_range) {
+                // PŘEDEK: 180 nebo -180 stupňů
+                else if (std::abs(norm_angle) >= (M_PI - HW_RAD)) {
                     front.push_back(value);
                 }
             }
@@ -59,8 +65,8 @@ namespace algorithms {
 
             return LidarFilterResults{
                 .front = avg(front),
-                .back = avg(back),
-                .left = avg(left),
+                .back  = avg(back),
+                .left  = avg(left),
                 .right = avg(right),
             };
         }
