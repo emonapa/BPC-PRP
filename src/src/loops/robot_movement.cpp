@@ -6,8 +6,8 @@
 namespace loops {
 
 MovementLoop::MovementLoop() : rclcpp::Node("robot_movement_node"),
-    wall_pid_(100.0f, 0.0f, 10.0f), // PID pro držení se zdi
-    turn_pid_(50.0f, 0.0f, 5.0f)    // PID pro přesné otáčení na úhel
+    wall_pid_(15.0f, 0.1f, 25.0f), // PID pro držení se zdi
+    turn_pid_(20.0f, 0.2f, 10.0f)   // PID pro přesné otáčení na úhel
 {
     // Odběr LiDARu
     lidar_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
@@ -67,9 +67,15 @@ void MovementLoop::imu_callback(const sensor_msgs::msg::Imu::SharedPtr msg) {
     }
 }
 
+float normalize_angle(float angle) {
+    while (angle > M_PI) angle -= 2.0f * M_PI;
+    while (angle < -M_PI) angle += 2.0f * M_PI;
+    return angle;
+}
+
 void MovementLoop::timer_callback() {
     if (current_state_ == MazeState::CALIBRATION) {
-        set_speed(127, 127); // Během kalibrace MUSÍ stát
+        set_speed(127, 127);
         return;
     }
 
@@ -78,67 +84,106 @@ void MovementLoop::timer_callback() {
     algorithms::LidarFilter filter;
     auto results = filter.apply_filter(latest_scan_->ranges, latest_scan_->angle_min, latest_scan_->angle_max);
 
-    // --- STAVOVÝ AUTOMAT ---
     switch (current_state_) {
 
-        case MazeState::CORRIDOR_FOLLOWING: {
-            float L = std::min(results.left, 0.5f);
-            float R = std::min(results.right, 0.5f);
-            float error = L - R;
+case MazeState::CORRIDOR_FOLLOWING: {
+    float L = results.left;
+    float R = results.right;
+    float F = results.front;
+    RCLCPP_INFO(this->get_logger(), "Som v CORRIDOR_FOLLOWING, F: %f", results.front);
+    // Hranice pre rozpoznanie steny/otvoreného priestoru
+    // V 40cm bludisku je stred chodby 20cm od steny. 
+    // Ak L > 0.35, znamená to, že tam stena určite nie je.
+    bool is_left_open = (L > 0.38f); 
+    bool is_right_open = (R > 0.38f);
+    
+    // Znížime hranicu detekcie steny pred nami. 
+    // Ak začne točiť uprostred chodby, skús 0.18f namiesto 0.22f.
+    bool is_front_blocked = (F < 0.22f); 
 
-            // Zjistíme, jestli nejsme v rohu (překážka vpředu)
-            if (results.front < 0.35f) {
-                // Přepínáme se do módu "OTÁČENÍ"
-                current_state_ = MazeState::TURNING;
-
-                float current_yaw = imu_integrator_.getYaw();
-
-                if (R >= 0.4f) {
-                    // Zeď vpředu, vpravo volno -> Cíl je -90 stupňů
-                    target_yaw_ = current_yaw - (M_PI / 2.0f);
-                    RCLCPP_INFO(this->get_logger(), "Roh! Budu tocit DOPRAVA.");
-                } else {
-                    // Zeď vpředu, vlevo volno -> Cíl je +90 stupňů
-                    target_yaw_ = current_yaw + (M_PI / 2.0f);
-                    RCLCPP_INFO(this->get_logger(), "Roh! Budu tocit DOLEVA.");
-                }
-                break; // Konec tohoto cyklu, motor se nastaví až příště
-            }
-
-            // Normální jízda chodbou (PID)
-            float steering = wall_pid_.step(error, 0.05f);
-            int base_speed = 145;
-            set_speed(base_speed - static_cast<int>(steering), base_speed + static_cast<int>(steering));
-            break;
+    // --- LOGIKA ROZHODOVÁNÍ O SMĚRU ---
+    if (is_front_blocked) {
+        // set_speed(127, 127); // STOP
+        float current_yaw = imu_integrator_.getYaw();
+        
+        if (is_right_open) {
+            target_yaw_ = normalize_angle(current_yaw - (M_PI / 2.0f));
+            // target_yaw_ = current_yaw - (M_PI / 2.0f);
+            RCLCPP_INFO(this->get_logger(), "Zákruta: DOPRAVA");
+        } else if (is_left_open) {
+            target_yaw_ = normalize_angle(current_yaw + (M_PI / 2.0f));
+            // target_yaw_ = current_yaw + (M_PI / 2.0f);
+            RCLCPP_INFO(this->get_logger(), "Zákruta: DOLEVA");
+        } else {
+            target_yaw_ = normalize_angle(current_yaw + M_PI); // Otočka o 180°
+            // target_yaw_ = current_yaw + M_PI; // Slepá ulička
+            RCLCPP_INFO(this->get_logger(), "Slepá ulica: OTOČKA");
         }
-
-        case MazeState::TURNING: {
-            float current_yaw = imu_integrator_.getYaw();
-            float yaw_error = target_yaw_ - current_yaw;
-
-            // Normalizace úhlu (aby se netočil jak pes za ocasem)
-            while (yaw_error > M_PI) yaw_error -= 2.0f * M_PI;
-            while (yaw_error < -M_PI) yaw_error += 2.0f * M_PI;
-
-            // Pokud jsme cílového úhlu dosáhli (tolerance cca 3 stupně)
-            if (std::abs(yaw_error) < 0.05f) {
-                current_state_ = MazeState::CORRIDOR_FOLLOWING;
-                turn_pid_.reset(); // Vyčistíme integrál z PID
-                RCLCPP_INFO(this->get_logger(), "Otocka hotova, jedu rovne.");
-                break;
-            }
-
-            // Otáčení na místě pomocí PID
-            float turn_speed = turn_pid_.step(yaw_error, 0.05f);
-            int correction = static_cast<int>(turn_speed);
-
-            // Limit síly zatáčení
-            correction = std::clamp(correction, -40, 40);
-
-            set_speed(127 - correction, 127 + correction);
-            break;
-        }
+        
+        current_state_ = MazeState::TURNING;
+        break; 
     }
+
+    // --- JAZDA CHODBOU (Udržiavanie stredu) ---
+    float steering = 0.0f;
+    int base_speed = 145;
+
+    // KRITICKÁ ÚPRAVA: Ak je jedna strana otvorená, nesmieš počítať (L - R)
+    if (is_left_open && is_right_open) {
+        steering = 0.0f; // Sme v križovatke, drž kolesá rovno
+    } else if (is_left_open) {
+        float error_right = 0.20f - R; 
+        steering = wall_pid_.step(error_right, 0.05f);
+    } else if (is_right_open) {
+        // Vidím len ľavú stenu, drž sa od nej 20cm
+        float error_left = L - 0.20f;
+        steering = wall_pid_.step(error_left, 0.05f);
+    } else {
+        // Klasická chodba - obe steny sú blízko
+        float error_center = L - R;
+        steering = wall_pid_.step(error_center, 0.05f);
+    }
+
+    set_speed(base_speed - static_cast<int>(steering), base_speed + static_cast<int>(steering));
+    break;
 }
 
-} // namespace loops
+    case MazeState::TURNING: {
+    float current_yaw = imu_integrator_.getYaw();
+    float yaw_error = target_yaw_ - current_yaw;
+
+    // Normalizácia
+    while (yaw_error > M_PI) yaw_error -= 2.0f * M_PI;
+    while (yaw_error < -M_PI) yaw_error += 2.0f * M_PI;
+
+    // RCLCPP_INFO(this->get_logger(), "Ciel: %.2f, Aktual: %.2f, Chyba: %.2f", target_yaw_, current_yaw, yaw_error);
+
+    // 1. Zväčši toleranciu na ukončenie (0.05 je veľmi prísne, skús 0.08 - 0.1)
+    if (std::abs(yaw_error) < 0.09f) {
+        set_speed(127, 127); 
+        // DÔLEŽITÉ: Daj mu 100ms pauzu (napr. cez pomocné počítadlo), 
+        // aby sa fyzicky zastavil, než začne znova riešiť steny v CORRIDOR_FOLLOWING
+        current_state_ = MazeState::CORRIDOR_FOLLOWING;
+        turn_pid_.reset();
+        break;
+    }
+
+    float turn_speed = turn_pid_.step(yaw_error, 0.05f);
+    
+    // 2. Problém bol v CLAMP: -20 až 20 je príliš málo! 
+    // Ak min_turn je 20, tak ten PID vlastne nemá kam regulovať.
+    // Zvýš clamp na aspoň 40.
+    int correction = std::clamp(static_cast<int>(turn_speed), -40, 40);
+
+    // 3. Ošetrenie minimálnej sily (Deadband)
+    int min_turn = 22; // Hodnota, kedy sa robot už reálne pohne
+    if (std::abs(correction) < min_turn) {
+        correction = (yaw_error > 0) ? min_turn : -min_turn;
+    }
+
+    set_speed(127 - correction, 127 + correction);
+    break;
+}
+    }
+}
+}

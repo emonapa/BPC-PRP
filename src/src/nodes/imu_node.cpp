@@ -81,7 +81,7 @@ void ImuNode::on_imu_msg(const sensor_msgs::msg::Imu::SharedPtr msg) {
 
         std_msgs::msg::UInt8MultiArray speed_msg;
         speed_msg.data = { static_cast<uint8_t>(left_speed), static_cast<uint8_t>(right_speed) };
-        motor_pub_->publish(speed_msg);
+        // motor_pub_->publish(speed_msg);
 
         // Volitelné: Odkomentujte pro vidění dat
         // RCLCPP_INFO(this->get_logger(), "Yaw: %.2f | Chyba: %.2f | Kor: %d", current_yaw, yaw_error, correction);

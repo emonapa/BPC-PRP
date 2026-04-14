@@ -3,11 +3,9 @@
 #include <vector>
 #include <numeric>
 #include <limits>
-#define FRONT_ANGLE 90
-#define RIGHT_ANGLE
+
 namespace algorithms {
 
-    // Structure to store filtered average distances in key directions
     struct LidarFilterResults {
         float front;
         float back;
@@ -20,50 +18,45 @@ namespace algorithms {
         LidarFilter() = default;
 
         LidarFilterResults apply_filter(std::vector<float> points, float angle_start, float angle_end) {
+            std::vector<float> left, right, front, back;
 
-            // Create containers for values in different directions
-            std::vector<float> left{};
-            std::vector<float> right{};
-            std::vector<float> front{};
-            std::vector<float> back{};
+            // KONŠTANTA PRE PRESNOSŤ: 
+            // Pôvodných M_PI/8 (22.5°) nahradíme cca 5° (M_PI/36).
+            // Tým získaš priemer z viacerých bodov (stabilitu), 
+            // ale len z tých, ktoré sú takmer kolmo na stenu.
+            constexpr float angle_range = M_PI / 36.0f; 
 
-            // TODO: Define how wide each directional sector should be (in radians)
-            constexpr float angle_range = M_PI/8;
-
-            // Compute the angular step between each range reading
             auto angle_step = (angle_end - angle_start) / points.size();
 
             for (size_t i = 0; i < points.size(); ++i) {
                 auto angle = angle_start + i * angle_step;
                 float value = points[i];
-                if (std::isinf(value) || value <= 0.01) {
-                    continue;
-                }
-                // TODO: Skip invalid (infinite) readings
 
-                  if (std::abs(angle) < angle_range) {
+                if (!std::isfinite(value) || value <= 0.01f) continue;
+
+                // 1. BACK (0 rad)
+                if (std::abs(angle) < angle_range) {
                     back.push_back(value);
-                    }
-                    // ✅ LEFT (~ +90°)
-                    else if (angle > (M_PI/2 - angle_range) && angle < (M_PI/2 + angle_range)) {
-                        right.push_back(value);
-                    }
-                    // ✅ RIGHT (~ -90°)
-                    else if (angle > (-M_PI/2 - angle_range) && angle < (-M_PI/2 + angle_range)) {
-                        left.push_back(value);
-                    }
-                    // ✅ BACK (~ ±180°)
-                    else if (std::abs(std::abs(angle) - M_PI) < angle_range) {
-                        front.push_back(value);
-                    }
-                // TODO: Sort the value into the correct directional bin based on angle
-                
+                }
+                // 2. RIGHT (PI/2 rad)
+                else if (std::abs(angle - M_PI/2.0f) < angle_range) {
+                    right.push_back(value);
+                }
+                // 3. LEFT (-PI/2 rad)
+                else if (std::abs(angle + M_PI/2.0f) < angle_range) {
+                    left.push_back(value);
+                }
+                // 4. FRONT (PI rad)
+                else if (std::abs(std::abs(angle) - M_PI) < angle_range) {
+                    front.push_back(value);
+                }
             }
+
             auto avg = [](const std::vector<float>& v) {
-                if (v.empty()) return std::numeric_limits<float>::infinity();
+                if (v.empty()) return 0.5f; // Ak nič nevidí, vrátime bezpečnú vzdialenosť
                 return std::accumulate(v.begin(), v.end(), 0.0f) / v.size();
             };
-            // TODO: Return the average of each sector (basic mean filter)
+
             return LidarFilterResults{
                 .front = avg(front),
                 .back = avg(back),
