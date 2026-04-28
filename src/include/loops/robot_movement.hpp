@@ -62,6 +62,7 @@ private:
     short int turnToTreasure = -1;
     std::chrono::steady_clock::time_point post_turn_start_time_;
     bool junction_detected = false;
+    
 };
 
 } // namespace loops
