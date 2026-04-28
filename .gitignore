@@ -10,3 +10,5 @@ src/build
 src/logger
 
 install/
+
+output.txt
