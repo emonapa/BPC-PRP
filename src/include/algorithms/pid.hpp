@@ -30,8 +30,8 @@ namespace algorithms {
 
             float derivative = (error - prev_error_) / dt;
             float output = (kp_ * error) + (ki_ * integral_) + (kd_ * derivative);
-            std::printf("ki: %.7f | integreal: %.2f | error %.2f | output: %.2f  \n", 
-                 ki_, integral_,error,output);
+            // std::printf("ki: %.7f | integreal: %.2f | error %.2f | output: %.2f  \n", 
+            //      ki_, integral_,error,output);
             prev_error_ = error;
             return output;
         }

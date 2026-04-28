@@ -10,13 +10,14 @@
 #include "algorithms/planar_imu_integrator.hpp"
 #include "algorithms/aruco_detector.hpp"        // PŘIDÁNO PRO KAMERU
 #include "helper.hpp"
-
+  
 namespace loops {
 
 enum class MazeState {
     CALIBRATION,
     CORRIDOR_FOLLOWING,
-    TURNING
+    TURNING,
+    POST_TURN_MOVE
 };
 
 class MovementLoop : public rclcpp::Node {
@@ -38,7 +39,7 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr camera_sub_; // PŘIDÁNO PRO KAMERU
     rclcpp::Publisher<std_msgs::msg::UInt8MultiArray>::SharedPtr motor_pub_;
     rclcpp::TimerBase::SharedPtr timer_;
-
+    std::chrono::steady_clock::time_point detection_time;
     // Data
     sensor_msgs::msg::LaserScan::SharedPtr latest_scan_;
     algorithms::PlanarImuIntegrator imu_integrator_;
@@ -57,6 +58,10 @@ private:
     float target_yaw_ = 0.0f;
     rclcpp::Time last_imu_time_;
     bool first_imu_ = true;
+    short int turnToExit = -1;
+    short int turnToTreasure = -1;
+    std::chrono::steady_clock::time_point post_turn_start_time_;
+    bool junction_detected = false;
 };
 
 } // namespace loops
