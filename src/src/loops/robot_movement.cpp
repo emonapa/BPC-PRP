@@ -7,8 +7,8 @@
 namespace loops {
 
 MovementLoop::MovementLoop() : rclcpp::Node("robot_movement_node"),
-    wall_pid_(12.0f, 0.0f, 25.0f), // PID pro držení se zdi
-    turn_pid_(20.0f, 0.0f, 10.0f)   // PID pro přesné otáčení na úhel
+    wall_pid_(14.0f, 0.0f, 25.0f), // PID pro držení se zdi
+    turn_pid_(20.0f, 0.0f, 5.0f)   // PID pro přesné otáčení na úhel
 {
     // Odběr LiDARu
     lidar_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
@@ -42,22 +42,24 @@ void MovementLoop::set_speed(int left, int right) {
 
 void MovementLoop::camera_callback(const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
     try {
-        // Převedení zkomprimovaných dat (JPEG) do OpenCV matice
         cv::Mat frame = cv::imdecode(cv::Mat(msg->data), cv::IMREAD_COLOR);
-
         if (frame.empty()) return;
 
-        // Zavoláme náš detektor
         auto markers = aruco_detector_.detect(frame);
-
-        // Uložíme si je, abychom s nimi mohli pracovat v timer_callbacku (např. na křižovatkách)
-        last_markers_ = markers;
-
-        // Pro ladění: Pokud robot nějakou značku uvidí, vypíše ji do terminálu
-        if (!markers.empty()) {
-            RCLCPP_INFO(this->get_logger(), "Vidim ArUco znacku! ID: %d", markers[0].id);
+        
+        for (auto& m : markers) {
+            // Treasure (10, 11, 12) má prioritu pred Exit (0, 1, 2)
+            if (m.id >= 10 && m.id <= 12) {
+                stored_decision_ = m.id;
+                RCLCPP_INFO(this->get_logger(), "Ulozeny TREASURE kod: %d", m.id);
+                break; // Treasure má top prioritu, končíme hľadanie
+            } else if (m.id >= 0 && m.id <= 2) {
+                if (stored_decision_ < 10) { // Prepíš len ak nemáme uložený Treasure
+                    stored_decision_ = m.id;
+                    RCLCPP_INFO(this->get_logger(), "Ulozeny EXIT kod: %d", m.id);
+                }
+            }
         }
-
     } catch (const cv::Exception& e) {
         RCLCPP_ERROR(this->get_logger(), "OpenCV Error: %s", e.what());
     }
@@ -114,81 +116,199 @@ void MovementLoop::timer_callback() {
     switch (current_state_) {
 
 case MazeState::CORRIDOR_FOLLOWING: {
-    float L = results.left;
-    float R = results.right;
-    float F = results.front;
-    RCLCPP_INFO(this->get_logger(), "Som v CORRIDOR_FOLLOWING, F: %f", results.front);
-    // Hranice pre rozpoznanie steny/otvoreného priestoru
-    // V 40cm bludisku je stred chodby 20cm od steny. 
-    // Ak L > 0.35, znamená to, že tam stena určite nie je.
-    bool is_left_open = (L > 0.38f); 
-    bool is_right_open = (R > 0.38f);
-    
-    // Znížime hranicu detekcie steny pred nami. 
-    // Ak začne točiť uprostred chodby, skús 0.18f namiesto 0.22f.
-    bool is_front_blocked = (F < 0.25f); 
+float L = results.left;
+float R = results.right;
+float F = results.front;
 
-    // --- LOGIKA ROZHODOVÁNÍ O SMĚRU ---
+// Definícia prahov hysterézie
+const float THRESH_HIGH = 0.42f; // Musí byť VIAC ako toto, aby sme si boli istí, že je voľno
+const float THRESH_LOW  = 0.35f; // Musí klesnúť POD toto, aby sme povedali, že tam niečo je
+
+// -------------------------
+// STABILIZÁCIA + HYSTERÉZIA ĽAVEJ STRANY
+// -------------------------
+// Ak už vidíme voľno (last_left_seen_ > 0), držíme ho, kým neklesne pod THRESH_LOW.
+// Ak nevidíme voľno, musíme prekročiť THRESH_HIGH, aby sme ho "aktivovali".
+if (L > (last_left_seen_ >= 5 ? 0.38f : THRESH_HIGH)) {
+    if (last_left_seen_ < 5) last_left_seen_++; 
+} else {
+    // Ak chceme, aby pri strate kontaktu hneď "zabudol" križovatku, daj tu: last_left_seen_ = 0;
+    // Ak chceme postupný dojazd (pôvodné správanie), nechaj:
+    if (last_left_seen_ > 0) last_left_seen_--;
+}
+
+// -------------------------
+// STABILIZÁCIA + HYSTERÉZIA PRAVEJ STRANY
+// -------------------------
+if (R > (last_right_seen_ >= 5 ? 0.38f : THRESH_HIGH)) {
+    if (last_right_seen_ < 5) last_right_seen_++;
+} else {
+    if (last_right_seen_ > 0) last_right_seen_--;
+}
+
+// -------------------------
+// LOGIKA STAVOV (Kľúčová zmena)
+// -------------------------
+// Cesta sa považuje za otvorenú až keď sme si 100% istí (counter dosiahol 5)
+bool is_left_open  = (last_left_seen_ >= 5);
+bool is_right_open = (last_right_seen_ >= 5);
+
+
+const float FRONT_BLOCK_HIGH = 0.25f; // Prah pre detekciu steny (aktivácia)
+const float FRONT_BLOCK_LOW  = 0.45f;
+if (front_blocked_state_) {
+    if (F > FRONT_BLOCK_LOW) front_blocked_state_ = false;
+} else {
+    if (F < FRONT_BLOCK_HIGH) front_blocked_state_ = true;
+}
+
+bool is_front_blocked = front_blocked_state_;
+
+bool is_front_close =F< FRONT_BLOCK_LOW;
+// -------------------------
+// IGNORE AFTER TURN
+// -------------------------
+if (ignore_side_counters_ > 0) {
+    float error_center = results.left - results.right;
+    float steering = wall_pid_.step(error_center, 0.05f);
+    // set_speed(145 - static_cast<int>(steering), 145 + static_cast<int>(steering));
+    set_speed(145,145);
+    ignore_side_counters_ --;
+    return;
+}
+
+    // Identifikácia situácie
+    int open_paths = (is_left_open ? 1 : 0) + (is_right_open ? 1 : 0) + (F > 0.35f ? 1 : 0);
+    float current_yaw = imu_integrator_.getYaw();
+    // ROZHODOVANIE - Spustí sa len ak:
+    // 1. Je pred nami stena (T-križovatka alebo zákruta)
+    // 2. Sú OTOVRENÉ OBE STRANY (X-križovatka) - tu predpokladáme, že sme v strede
+    if(is_front_close){
     if (is_front_blocked) {
-        set_speed(127, 127); // STOP
-        float current_yaw = imu_integrator_.getYaw();
         
-        if (is_right_open) {
-            target_yaw_ = normalize_angle(current_yaw - (M_PI / 2.0f));
-            // target_yaw_ = current_yaw - (M_PI / 2.0f);
-            RCLCPP_INFO(this->get_logger(), "Zákruta: DOPRAVA");
-        } else if (is_left_open) {
-            target_yaw_ = normalize_angle(current_yaw + (M_PI / 2.0f));
-            // target_yaw_ = current_yaw + (M_PI / 2.0f);
-            RCLCPP_INFO(this->get_logger(), "Zákruta: DOLEVA");
-        } else {
-            target_yaw_ = normalize_angle(current_yaw + M_PI); // Otočka o 180°
-            // target_yaw_ = current_yaw + M_PI; // Slepá ulička
-            RCLCPP_INFO(this->get_logger(), "Slepá ulica: OTOČKA");
+        
+        int direction = (stored_decision_ != -1) ? (stored_decision_ % 10) : -1;
+        bool state_changed = false;
+        bool state_turn =false;
+
+        // KRIŽOVATKA (viac ako 1 cesta vpred/do boku)
+        if (open_paths >= 2) {
+            RCLCPP_INFO(this->get_logger(), "Krizovatka %d",direction);
+            if (direction == 1 && is_left_open) {
+                target_yaw_ = normalize_angle(current_yaw + (M_PI / 2.0f));
+                state_changed = true;
+            } else if (direction == 2 && is_right_open) {
+                target_yaw_ = normalize_angle(current_yaw - (M_PI / 2.0f));
+                state_changed = true;
+            } else if (direction == 0 && !is_front_blocked) {
+                // ROVNO: Nemeníme state na TURNING, len resetujeme kód a ideme ďalej
+                stored_decision_ = -1;
+                ignore_side_counters_ = 13; // Ignoruj túto križovatku kým z nej nevyjdeš
+            }
+        }       
+        else if (is_front_blocked) {
+            state_turn =true;
+             RCLCPP_INFO(this->get_logger(), "Zakruta %d",direction);
+            if (is_left_open) {
+                target_yaw_ = normalize_angle(current_yaw + (M_PI / 2.0f));
+                RCLCPP_INFO(this->get_logger(), "left %d",direction);
+                state_changed = true;
+                
+            } else if (is_right_open) {
+                target_yaw_ = normalize_angle(current_yaw - (M_PI / 2.0f));
+                 RCLCPP_INFO(this->get_logger(), "right %d",direction);
+                state_changed = true;
+            } else {
+                target_yaw_ = normalize_angle(current_yaw + M_PI); // Otočka
+                 RCLCPP_INFO(this->get_logger(), "otocka %d",direction);
+                state_changed = true;
+            }
         }
-        
-        current_state_ = MazeState::TURNING;
-        return; 
+
+        if (state_changed) {
+            RCLCPP_INFO(this->get_logger(), "CHANGING STATE ");
+            // set_speed(127, 127);
+            turn_start_delay_ = 3; // cca 150ms (3 * 50ms)
+            current_state_ = MazeState::TURNING;
+            if(!state_turn) stored_decision_ = -1;
+            return;
+        }
     }
+    set_speed(144,145);
+    return;
+}
 
-    // --- JAZDA CHODBOU (Udržiavanie stredu) ---
     float steering = 0.0f;
-    int base_speed = 165;
+    int base_speed = 145;
 
-    // KRITICKÁ ÚPRAVA: Ak je jedna strana otvorená, nesmieš počítať (L - R)
+     bool state_changed =false;
+    int direction = (stored_decision_ != -1) ? (stored_decision_ % 10) : -1;
     if (is_left_open && is_right_open) {
-        steering = 0.0f; // Sme v križovatke, drž kolesá rovno
+        RCLCPP_INFO(this->get_logger(), "X %d",direction);
+        if (direction == 1 && is_left_open) {
+            target_yaw_ = normalize_angle(current_yaw + (M_PI / 2.0f));
+            state_changed = true;
+        } else if (direction == 2 && is_right_open) {
+            target_yaw_ = normalize_angle(current_yaw - (M_PI / 2.0f));
+            state_changed = true;
+        }
+        else{
+            stored_decision_ = -1;
+            steering = 0.0f;
+        }
     } else if (is_left_open) {
-        float error_right = 0.20f - R; 
-        steering = wall_pid_.step(error_right, 0.05f);
+         RCLCPP_INFO(this->get_logger(), "L  %d",direction);
+       if (direction == 1 && is_left_open) {
+            target_yaw_ = normalize_angle(current_yaw + (M_PI / 2.0f));
+            state_changed = true;
+        }
+        else {
+               stored_decision_ = -1;
+               steering = 0.0f;
+            }
     } else if (is_right_open) {
-        // Vidím len ľavú stenu, drž sa od nej 20cm
-        float error_left = L - 0.20f;
-        steering = wall_pid_.step(error_left, 0.05f);
+         RCLCPP_INFO(this->get_logger(), "R %d",direction);
+        if (is_right_open && direction == 2) {
+                target_yaw_ = normalize_angle(current_yaw - (M_PI / 2.0f));
+                state_changed = true;
+        }
+        else{
+             RCLCPP_INFO(this->get_logger(), "base %d",direction);
+             stored_decision_ = -1;
+             steering = 0.0f;
+        }
     } else {
-        // Klasická chodba - obe steny sú blízko
         float error_center = L - R;
         steering = wall_pid_.step(error_center, 0.05f);
     }
+
+     if (state_changed) {
+         RCLCPP_INFO(this->get_logger(), "CHANGING STATE  1");
+            // set_speed(127, 127);
+            turn_start_delay_ = 13; // cca 150ms (3 * 50ms)
+            current_state_ = MazeState::TURNING;
+            stored_decision_ = -1;
+            return;
+        }
 
     set_speed(base_speed - static_cast<int>(steering), base_speed + static_cast<int>(steering));
     break;
 }
 
 case MazeState::TURNING: {
+     RCLCPP_INFO(this->get_logger(), "IN TURNING ");
+     if (turn_start_delay_ > 0) {
+        turn_start_delay_--;
+    return; // nič nerob → nech sa robot “rozbehne”
+}
     float current_yaw = imu_integrator_.getYaw();
     float yaw_error = normalize_angle(target_yaw_ - current_yaw);
 
-    if (std::abs(yaw_error) < 0.08f) { // Tolerancia
+    if (std::abs(yaw_error) < 0.08f) {
+         RCLCPP_INFO(this->get_logger(), "IN TURNING RESET "); // Tolerancia
         set_speed(127, 127);
-        
-        // Statické čítač (jednoduchý trik na pauzu bez blokovania vlákna)
-        static int wait_cycles = 0;
-        if (wait_cycles < 5) { // Počkaj cca 250ms (5 * 50ms)
-            wait_cycles++;
-            return;
-        }
-        wait_cycles = 0;
+        // KONIEC OTÁČANIA
+        ignore_side_counters_ = 43;
 
         current_state_ = MazeState::CORRIDOR_FOLLOWING;
         turn_pid_.reset();
@@ -196,14 +316,14 @@ case MazeState::TURNING: {
     }
 
     float turn_speed = turn_pid_.step(yaw_error, 0.05f);
-    int correction = std::clamp(static_cast<int>(turn_speed), -60, 60); // Zvýšený rozsah
+    int correction = std::clamp(static_cast<int>(turn_speed), -30, 30); // Zvýšený rozsah
 
     // Jemnejší deadband - ak je chyba malá, zmenši aj minimálnu silu
-    int min_force = (std::abs(yaw_error) < 0.2f) ? 15 : 25; 
+    int min_force = (std::abs(yaw_error) < 0.2f) ? 5 : 10; 
     if (std::abs(correction) < min_force) {
         correction = (yaw_error > 0) ? min_force : -min_force;
     }
-
+     RCLCPP_INFO(this->get_logger(), "IN TURNING  %d",correction);
     set_speed(127 - correction, 127 + correction);
     break;
 }

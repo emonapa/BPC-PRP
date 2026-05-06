@@ -62,6 +62,16 @@ private:
     short int turnToTreasure = -1;
     std::chrono::steady_clock::time_point post_turn_start_time_;
     bool junction_detected = false;
+    int stored_decision_ = -1;
+    int ignore_side_counters_ = 0;
+    int turn_start_delay_=0;
+    int right_open_count_ =0;
+    int  left_open_count_ = 0;
+    int last_left_seen_ = 0;
+   int last_right_seen_ = 0;
+   int front_blocked_state_ =0;
+   int front_seen_counter_ =0;
+
     
 };
 
