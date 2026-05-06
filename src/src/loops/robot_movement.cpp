@@ -7,7 +7,7 @@
 namespace loops {
 
 MovementLoop::MovementLoop() : rclcpp::Node("robot_movement_node"),
-    wall_pid_(14.0f, 0.0f, 25.0f), // PID pro držení se zdi
+    wall_pid_(13.0f, 0.0f, 25.0f), // PID pro držení se zdi
     turn_pid_(20.0f, 0.0f, 5.0f)   // PID pro přesné otáčení na úhel
 {
     // Odběr LiDARu
@@ -169,7 +169,7 @@ bool is_front_close =F< FRONT_BLOCK_LOW;
 // IGNORE AFTER TURN
 // -------------------------
 if (ignore_side_counters_ > 0) {
-    float error_center = results.left - results.right;
+    float error_center = std::clamp(static_cast<int>(L), 0, 30) - std::clamp(static_cast<int>(R), 0, 30); ;
     float steering = wall_pid_.step(error_center, 0.05f);
     // set_speed(145 - static_cast<int>(steering), 145 + static_cast<int>(steering));
     set_speed(145,145);
@@ -228,13 +228,13 @@ if (ignore_side_counters_ > 0) {
         if (state_changed) {
             RCLCPP_INFO(this->get_logger(), "CHANGING STATE ");
             // set_speed(127, 127);
-            turn_start_delay_ = 3; // cca 150ms (3 * 50ms)
+            turn_start_delay_ = 5; // cca 150ms (3 * 50ms)
             current_state_ = MazeState::TURNING;
             if(!state_turn) stored_decision_ = -1;
             return;
         }
     }
-    set_speed(144,145);
+    set_speed(145,145);
     return;
 }
 
@@ -253,18 +253,20 @@ if (ignore_side_counters_ > 0) {
             state_changed = true;
         }
         else{
-            stored_decision_ = -1;
+        //   target_yaw_ =current_yaw;
+            state_changed = true;
             steering = 0.0f;
         }
     } else if (is_left_open) {
          RCLCPP_INFO(this->get_logger(), "L  %d",direction);
-       if (direction == 1 && is_left_open) {
+        if (direction == 1 && is_left_open) {
             target_yaw_ = normalize_angle(current_yaw + (M_PI / 2.0f));
             state_changed = true;
         }
         else {
-               stored_decision_ = -1;
-               steering = 0.0f;
+            // target_yaw_ =current_yaw;
+           state_changed = true;
+            steering = 0.0f;
             }
     } else if (is_right_open) {
          RCLCPP_INFO(this->get_logger(), "R %d",direction);
@@ -273,9 +275,10 @@ if (ignore_side_counters_ > 0) {
                 state_changed = true;
         }
         else{
-             RCLCPP_INFO(this->get_logger(), "base %d",direction);
-             stored_decision_ = -1;
-             steering = 0.0f;
+           //  RCLCPP_INFO(this->get_logger(), "base %d",direction);
+             target_yaw_ =current_yaw;
+            state_changed = true;
+            steering = 0.0f;
         }
     } else {
         float error_center = L - R;
@@ -298,6 +301,7 @@ if (ignore_side_counters_ > 0) {
 case MazeState::TURNING: {
      RCLCPP_INFO(this->get_logger(), "IN TURNING ");
      if (turn_start_delay_ > 0) {
+        set_speed(145, 145);
         turn_start_delay_--;
     return; // nič nerob → nech sa robot “rozbehne”
 }
