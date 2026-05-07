@@ -3,12 +3,14 @@
 #include <opencv2/opencv.hpp> // PŘIDÁNO PRO KAMERU
 #include <algorithm>
 #include <cmath>
+#define SPEED 155
+
 
 namespace loops {
 
 MovementLoop::MovementLoop() : rclcpp::Node("robot_movement_node"),
-    wall_pid_(13.0f, 0.0f, 25.0f), // PID pro držení se zdi
-    turn_pid_(20.0f, 0.0f, 5.0f)   // PID pro přesné otáčení na úhel
+    wall_pid_(18.0f, 0.0f, 25.0f), // PID pro držení se zdi
+    turn_pid_(25.0f, 0.0f, 8.0f)   // PID pro přesné otáčení na úhel
 {
     // Odběr LiDARu
     lidar_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
@@ -172,7 +174,7 @@ if (ignore_side_counters_ > 0) {
     float error_center = std::clamp(static_cast<int>(L), 0, 30) - std::clamp(static_cast<int>(R), 0, 30); ;
     float steering = wall_pid_.step(error_center, 0.05f);
     // set_speed(145 - static_cast<int>(steering), 145 + static_cast<int>(steering));
-    set_speed(145,145);
+    set_speed(SPEED,SPEED);
     ignore_side_counters_ --;
     return;
 }
@@ -228,18 +230,18 @@ if (ignore_side_counters_ > 0) {
         if (state_changed) {
             RCLCPP_INFO(this->get_logger(), "CHANGING STATE ");
             // set_speed(127, 127);
-            turn_start_delay_ = 5; // cca 150ms (3 * 50ms)
+            turn_start_delay_ = 0; // cca 150ms (3 * 50ms)
             current_state_ = MazeState::TURNING;
             if(!state_turn) stored_decision_ = -1;
             return;
         }
     }
-    set_speed(145,145);
+    set_speed(SPEED,SPEED);
     return;
 }
 
     float steering = 0.0f;
-    int base_speed = 145;
+    int base_speed = SPEED;
 
      bool state_changed =false;
     int direction = (stored_decision_ != -1) ? (stored_decision_ % 10) : -1;
@@ -288,7 +290,7 @@ if (ignore_side_counters_ > 0) {
      if (state_changed) {
          RCLCPP_INFO(this->get_logger(), "CHANGING STATE  1");
             // set_speed(127, 127);
-            turn_start_delay_ = 13; // cca 150ms (3 * 50ms)
+            turn_start_delay_ = 7; // cca 150ms (3 * 50ms)
             current_state_ = MazeState::TURNING;
             stored_decision_ = -1;
             return;
@@ -301,7 +303,7 @@ if (ignore_side_counters_ > 0) {
 case MazeState::TURNING: {
      RCLCPP_INFO(this->get_logger(), "IN TURNING ");
      if (turn_start_delay_ > 0) {
-        set_speed(145, 145);
+        set_speed(SPEED, SPEED);
         turn_start_delay_--;
     return; // nič nerob → nech sa robot “rozbehne”
 }
@@ -312,7 +314,7 @@ case MazeState::TURNING: {
          RCLCPP_INFO(this->get_logger(), "IN TURNING RESET "); // Tolerancia
         set_speed(127, 127);
         // KONIEC OTÁČANIA
-        ignore_side_counters_ = 43;
+        ignore_side_counters_ = 32;
 
         current_state_ = MazeState::CORRIDOR_FOLLOWING;
         turn_pid_.reset();
@@ -320,10 +322,10 @@ case MazeState::TURNING: {
     }
 
     float turn_speed = turn_pid_.step(yaw_error, 0.05f);
-    int correction = std::clamp(static_cast<int>(turn_speed), -30, 30); // Zvýšený rozsah
+    int correction = std::clamp(static_cast<int>(turn_speed), -40, 40); // Zvýšený rozsah
 
     // Jemnejší deadband - ak je chyba malá, zmenši aj minimálnu silu
-    int min_force = (std::abs(yaw_error) < 0.2f) ? 5 : 10; 
+    int min_force = (std::abs(yaw_error) < 0.2f) ? 7 : 12; 
     if (std::abs(correction) < min_force) {
         correction = (yaw_error > 0) ? min_force : -min_force;
     }
