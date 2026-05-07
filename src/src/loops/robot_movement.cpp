@@ -9,7 +9,7 @@
 namespace loops {
 
 MovementLoop::MovementLoop() : rclcpp::Node("robot_movement_node"),
-    wall_pid_(18.0f, 0.0f, 25.0f), // PID pro držení se zdi
+    wall_pid_(20.0f, 0.0f, 25.0f), // PID pro držení se zdi
     turn_pid_(25.0f, 0.0f, 8.0f)   // PID pro přesné otáčení na úhel
 {
     // Odběr LiDARu
@@ -122,28 +122,20 @@ float L = results.left;
 float R = results.right;
 float F = results.front;
 
-// Definícia prahov hysterézie
+
 const float THRESH_HIGH = 0.42f; // Musí byť VIAC ako toto, aby sme si boli istí, že je voľno
 const float THRESH_LOW  = 0.35f; // Musí klesnúť POD toto, aby sme povedali, že tam niečo je
 
-// -------------------------
-// STABILIZÁCIA + HYSTERÉZIA ĽAVEJ STRANY
-// -------------------------
-// Ak už vidíme voľno (last_left_seen_ > 0), držíme ho, kým neklesne pod THRESH_LOW.
-// Ak nevidíme voľno, musíme prekročiť THRESH_HIGH, aby sme ho "aktivovali".
-if (L > (last_left_seen_ >= 5 ? 0.38f : THRESH_HIGH)) {
-    if (last_left_seen_ < 5) last_left_seen_++; 
+
+if (L > (last_left_seen_ >= 2 ? 0.38f : THRESH_HIGH)) {
+    if (last_left_seen_ < 2) last_left_seen_++; 
 } else {
-    // Ak chceme, aby pri strate kontaktu hneď "zabudol" križovatku, daj tu: last_left_seen_ = 0;
-    // Ak chceme postupný dojazd (pôvodné správanie), nechaj:
     if (last_left_seen_ > 0) last_left_seen_--;
 }
 
-// -------------------------
-// STABILIZÁCIA + HYSTERÉZIA PRAVEJ STRANY
-// -------------------------
-if (R > (last_right_seen_ >= 5 ? 0.38f : THRESH_HIGH)) {
-    if (last_right_seen_ < 5) last_right_seen_++;
+
+if (R > (last_right_seen_ >= 2 ? 0.38f : THRESH_HIGH)) {
+    if (last_right_seen_ < 2) last_right_seen_++;
 } else {
     if (last_right_seen_ > 0) last_right_seen_--;
 }
@@ -152,8 +144,8 @@ if (R > (last_right_seen_ >= 5 ? 0.38f : THRESH_HIGH)) {
 // LOGIKA STAVOV (Kľúčová zmena)
 // -------------------------
 // Cesta sa považuje za otvorenú až keď sme si 100% istí (counter dosiahol 5)
-bool is_left_open  = (last_left_seen_ >= 5);
-bool is_right_open = (last_right_seen_ >= 5);
+bool is_left_open  = (last_left_seen_ >= 2);
+bool is_right_open = (last_right_seen_ >= 2);
 
 
 const float FRONT_BLOCK_HIGH = 0.25f; // Prah pre detekciu steny (aktivácia)
@@ -195,22 +187,21 @@ if (ignore_side_counters_ > 0) {
 
         // KRIŽOVATKA (viac ako 1 cesta vpred/do boku)
         if (open_paths >= 2) {
-            RCLCPP_INFO(this->get_logger(), "Krizovatka %d",direction);
+            RCLCPP_INFO(this->get_logger(), "Krizovatka %d %d %d",direction,is_left_open,is_right_open);
             if (direction == 1 && is_left_open) {
                 target_yaw_ = normalize_angle(current_yaw + (M_PI / 2.0f));
                 state_changed = true;
             } else if (direction == 2 && is_right_open) {
                 target_yaw_ = normalize_angle(current_yaw - (M_PI / 2.0f));
                 state_changed = true;
-            } else if (direction == 0 && !is_front_blocked) {
-                // ROVNO: Nemeníme state na TURNING, len resetujeme kód a ideme ďalej
-                stored_decision_ = -1;
-                ignore_side_counters_ = 13; // Ignoruj túto križovatku kým z nej nevyjdeš
+            } else if (direction == -1) {
+                target_yaw_ = normalize_angle(current_yaw + (M_PI / 2.0f));
+                state_changed = true;
             }
         }       
         else if (is_front_blocked) {
             state_turn =true;
-             RCLCPP_INFO(this->get_logger(), "Zakruta %d",direction);
+             RCLCPP_INFO(this->get_logger(), "Zakruta %d %d %d" ,direction, is_left_open ,is_right_open);
             if (is_left_open) {
                 target_yaw_ = normalize_angle(current_yaw + (M_PI / 2.0f));
                 RCLCPP_INFO(this->get_logger(), "left %d",direction);
@@ -278,7 +269,7 @@ if (ignore_side_counters_ > 0) {
         }
         else{
            //  RCLCPP_INFO(this->get_logger(), "base %d",direction);
-             target_yaw_ =current_yaw;
+            // target_yaw_ =current_yaw;
             state_changed = true;
             steering = 0.0f;
         }
@@ -314,7 +305,7 @@ case MazeState::TURNING: {
          RCLCPP_INFO(this->get_logger(), "IN TURNING RESET "); // Tolerancia
         set_speed(127, 127);
         // KONIEC OTÁČANIA
-        ignore_side_counters_ = 32;
+        ignore_side_counters_ = 27;
 
         current_state_ = MazeState::CORRIDOR_FOLLOWING;
         turn_pid_.reset();
@@ -325,7 +316,7 @@ case MazeState::TURNING: {
     int correction = std::clamp(static_cast<int>(turn_speed), -40, 40); // Zvýšený rozsah
 
     // Jemnejší deadband - ak je chyba malá, zmenši aj minimálnu silu
-    int min_force = (std::abs(yaw_error) < 0.2f) ? 7 : 12; 
+    int min_force = (std::abs(yaw_error) < 0.2f) ? 10 : 15; 
     if (std::abs(correction) < min_force) {
         correction = (yaw_error > 0) ? min_force : -min_force;
     }
